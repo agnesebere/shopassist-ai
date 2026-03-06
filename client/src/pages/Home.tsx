@@ -1,13 +1,20 @@
 /* =============================================================
-   ShopAssist AI — Home Page (Chatbot Interface)
+   ShopAssist AI — Home Page (Groq-powered Chatbot)
    Design: Warm Commerce — Forest Green sidebar, Cream chat area
-   Two-column layout: Left sidebar (35%) + Right chat (65%)
+   Uses useChat from @ai-sdk/react for real streaming LLM responses
    ============================================================= */
 
+import { useChat, type UIMessage, Chat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
 import { useState, useRef, useEffect } from "react";
-import { Send, Package, RotateCcw, HelpCircle, ChevronRight, Truck, CheckCircle2, Clock, AlertCircle, MessageSquare, Phone, Mail, Star } from "lucide-react";
+import {
+  Send, Package, RotateCcw, HelpCircle, ChevronRight,
+  Truck, CheckCircle2, Clock, AlertCircle, MessageSquare,
+  Phone, Mail, Star, Loader2
+} from "lucide-react";
+import { Streamdown } from "streamdown";
 
-// ── Mock Order Data ──────────────────────────────────────────
+// ── Mock Order Data (mirrors server) ────────────────────────
 const MOCK_ORDERS = [
   {
     id: "ORD-78234",
@@ -56,81 +63,11 @@ const STATUS_LABELS: Record<string, string> = {
   delivered: "Delivered",
 };
 
-// ── LLM-style Response Engine ────────────────────────────────
-function generateBotResponse(userMessage: string): { text: string; orderCard?: typeof MOCK_ORDERS[0]; chips?: string[] } {
-  const msg = userMessage.toLowerCase();
-
-  // Order tracking intent
-  const orderMatch = MOCK_ORDERS.find(o =>
-    msg.includes(o.id.toLowerCase()) || msg.includes(o.product.toLowerCase().split(" ")[0])
-  );
-
-  if (orderMatch || msg.includes("order") || msg.includes("track") || msg.includes("where")) {
-    const order = orderMatch || MOCK_ORDERS[0];
-    return {
-      text: `I found your order **${order.id}** for *${order.product}*. Here's the latest update:`,
-      orderCard: order,
-      chips: ["Track another order", "Start a return", "Contact support"],
-    };
-  }
-
-  if (msg.includes("return") || msg.includes("refund") || msg.includes("exchange")) {
-    return {
-      text: "I can help you with a return or refund. Our return policy allows returns within **30 days** of delivery for most items. To start a return:\n\n1. Select the order you'd like to return\n2. Choose your reason\n3. Print the prepaid label we'll email you\n\nWould you like me to initiate a return for one of your recent orders?",
-      chips: ["Return ORD-78234", "Return ORD-77891", "Return policy FAQ"],
-    };
-  }
-
-  if (msg.includes("delay") || msg.includes("late") || msg.includes("slow")) {
-    return {
-      text: "I understand your frustration — delays are never fun! Your order **ORD-78234** is currently in transit and is experiencing a **1-day delay** due to high carrier volume. The updated estimated delivery is **March 8, 2026**.\n\nWould you like me to escalate this to our logistics team or send you a delivery notification?",
-      chips: ["Escalate to team", "Set delivery alert", "Request compensation"],
-    };
-  }
-
-  if (msg.includes("cancel")) {
-    return {
-      text: "I can check if your order is still eligible for cancellation. Orders can be cancelled **before they are shipped**. Your order **ORD-76540** (Stainless Steel Water Bottle) is still in processing and **can be cancelled**.\n\nWould you like to proceed with the cancellation?",
-      chips: ["Yes, cancel ORD-76540", "No, keep it", "Talk to an agent"],
-    };
-  }
-
-  if (msg.includes("hello") || msg.includes("hi") || msg.includes("hey") || msg.includes("help")) {
-    return {
-      text: "Hello! I'm **ShopAssist**, your AI-powered support agent. I'm here to help you with:\n\n- Order tracking & delivery updates\n- Returns, refunds & exchanges\n- Cancellations\n- Product questions & FAQs\n\nWhat can I help you with today?",
-      chips: ["Track my order", "Start a return", "Cancel an order", "Talk to an agent"],
-    };
-  }
-
-  if (msg.includes("agent") || msg.includes("human") || msg.includes("person") || msg.includes("support")) {
-    return {
-      text: "Of course! I'm connecting you with a live support agent. Our team is available **Monday–Friday, 9am–6pm EST**.\n\nCurrent wait time: **~3 minutes**\n\nAlternatively, you can reach us at:\n- **Email:** support@shopmart.com\n- **Phone:** 1-800-SHOP-123",
-      chips: ["Join queue", "Send email instead", "Schedule callback"],
-    };
-  }
-
-  if (msg.includes("faq") || msg.includes("policy") || msg.includes("shipping")) {
-    return {
-      text: "Here are our most common policies:\n\n**Shipping:** Free standard shipping on orders over $50. Express (2-day) available for $9.99.\n\n**Returns:** 30-day return window for all items in original condition.\n\n**Refunds:** Processed within 5–7 business days to your original payment method.\n\nIs there anything specific you'd like to know more about?",
-      chips: ["Shipping details", "Return policy", "Payment methods"],
-    };
-  }
-
-  return {
-    text: "I'm here to help! Could you give me a bit more detail about your question? For example, you can share your **order number** (e.g., ORD-78234) or describe what you need help with.",
-    chips: ["Track my order", "Start a return", "Shipping FAQ", "Talk to an agent"],
-  };
-}
-
-// ── Types ────────────────────────────────────────────────────
-type Message = {
-  id: string;
-  role: "user" | "bot";
-  text: string;
-  orderCard?: typeof MOCK_ORDERS[0];
-  chips?: string[];
-  timestamp: Date;
-};
+// ── Quick Reply Chips per context ────────────────────────────
+const WELCOME_CHIPS = ["Track my order", "Start a return", "Cancel an order", "Talk to an agent"];
+const TRACKING_CHIPS = ["Track another order", "Start a return", "Contact support"];
+const RETURN_CHIPS = ["Return ORD-78234", "Return ORD-77891", "Return policy FAQ"];
+const GENERAL_CHIPS = ["Track my order", "Shipping policy", "Talk to an agent"];
 
 // ── Sub-components ───────────────────────────────────────────
 function StatusIcon({ status }: { status: string }) {
@@ -157,7 +94,7 @@ function StatusBadge({ status, label }: { status: string; label: string }) {
   );
 }
 
-function OrderProgressBar({ steps, currentSteps }: { steps: string[]; currentSteps: string[] }) {
+function OrderProgressBar({ currentSteps }: { currentSteps: string[] }) {
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between mb-1">
@@ -208,79 +145,7 @@ function OrderCard({ order }: { order: typeof MOCK_ORDERS[0] }) {
       </div>
       <div className="mt-2 pt-2 border-t border-gray-50">
         <p className="text-[10px] text-gray-400 mb-1">Tracking: <span className="font-mono text-gray-600">{order.trackingCode}</span></p>
-        <OrderProgressBar steps={STATUS_STEPS} currentSteps={order.steps} />
-      </div>
-    </div>
-  );
-}
-
-function BotMessage({ message }: { message: Message }) {
-  const lines = message.text.split("\n").filter(Boolean);
-  return (
-    <div className="flex gap-3 message-animate">
-      <div className="w-8 h-8 rounded-full bg-[#1B4332] flex items-center justify-center flex-shrink-0 mt-0.5">
-        <img
-          src="https://d2xsxph8kpxj0f.cloudfront.net/116904845/ejTkHNWBAbKrRgMUkRFbyy/hero-bot-avatar-5Ecm4BhbQjjHou96DWQk9W.webp"
-          alt="Bot"
-          className="w-full h-full rounded-full object-cover"
-        />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm max-w-lg">
-          <div className="text-sm text-gray-800 leading-relaxed space-y-1">
-            {lines.map((line, i) => {
-              // Bold markdown
-              const parts = line.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
-              return (
-                <p key={i} className={line.startsWith("-") ? "pl-3" : ""}>
-                  {parts.map((part, j) => {
-                    if (part.startsWith("**") && part.endsWith("**"))
-                      return <strong key={j} className="font-semibold text-gray-900">{part.slice(2, -2)}</strong>;
-                    if (part.startsWith("*") && part.endsWith("*"))
-                      return <em key={j} className="italic text-gray-700">{part.slice(1, -1)}</em>;
-                    return <span key={j}>{part}</span>;
-                  })}
-                </p>
-              );
-            })}
-          </div>
-          {message.orderCard && <OrderCard order={message.orderCard} />}
-        </div>
-        {message.chips && message.chips.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-2">
-            {message.chips.map((chip, i) => (
-              <button
-                key={chip}
-                data-chip={chip}
-                className="chip-animate text-xs px-3 py-1.5 rounded-full border border-[#1B4332]/20 text-[#1B4332] bg-white hover:bg-[#1B4332] hover:text-white transition-all duration-150 font-medium shadow-sm"
-                style={{ animationDelay: `${i * 60}ms` }}
-              >
-                {chip}
-              </button>
-            ))}
-          </div>
-        )}
-        <p className="text-[10px] text-gray-400 mt-1 ml-1">
-          {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function UserMessage({ message }: { message: Message }) {
-  return (
-    <div className="flex gap-3 justify-end message-animate">
-      <div className="flex-1 min-w-0 flex flex-col items-end">
-        <div className="bg-[#1B4332] text-white rounded-2xl rounded-tr-sm px-4 py-3 shadow-sm max-w-sm">
-          <p className="text-sm leading-relaxed">{message.text}</p>
-        </div>
-        <p className="text-[10px] text-gray-400 mt-1 mr-1">
-          {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </p>
-      </div>
-      <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0 mt-0.5 text-amber-700 font-semibold text-sm">
-        Y
+        <OrderProgressBar currentSteps={order.steps} />
       </div>
     </div>
   );
@@ -307,64 +172,61 @@ function TypingIndicator() {
   );
 }
 
+// Detect if a bot message mentions an order and return the matching order card
+function detectOrderCard(text: string): typeof MOCK_ORDERS[0] | null {
+  for (const order of MOCK_ORDERS) {
+    if (text.includes(order.id)) return order;
+  }
+  return null;
+}
+
+// Detect which quick-reply chips to show based on message content
+function detectChips(text: string): string[] {
+  const t = text.toLowerCase();
+  if (t.includes("track") || t.includes("in transit") || t.includes("delivered") || t.includes("carrier")) return TRACKING_CHIPS;
+  if (t.includes("return") || t.includes("refund") || t.includes("exchange")) return RETURN_CHIPS;
+  return GENERAL_CHIPS;
+}
+
 // ── Main Component ───────────────────────────────────────────
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "bot",
-      text: "Hello! I'm **ShopAssist**, your AI-powered support agent. I'm here to help you with:\n\n- Order tracking & delivery updates\n- Returns, refunds & exchanges\n- Cancellations\n- Product questions & FAQs\n\nWhat can I help you with today?",
-      chips: ["Track my order", "Start a return", "Cancel an order", "Talk to an agent"],
-      timestamp: new Date(),
-    },
-  ]);
-  const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<typeof MOCK_ORDERS[0] | null>(null);
+  const [rating, setRating] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+
+  const [inputValue, setInputValue] = useState("");
+
+  const [chat] = useState(() => new Chat({
+    transport: new DefaultChatTransport({ api: "/api/chat" }),
+    onFinish: ({ message }: { message: UIMessage }) => {
+      const text = message.parts.filter(p => p.type === "text").map(p => (p as { type: "text"; text: string }).text).join("");
+      const order = detectOrderCard(text);
+      if (order) setSelectedOrder(order);
+    },
+  }));
+
+  const { messages, sendMessage, status } = useChat({ chat });
+
+  const isLoading = status === "streaming" || status === "submitted";
+
+  const doSend = (text: string) => {
+    if (!text.trim() || isLoading) return;
+    sendMessage({ text: text.trim() });
+    setInputValue("");
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping]);
+  }, [messages, isLoading]);
 
-  const sendMessage = (text: string) => {
-    if (!text.trim()) return;
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      text: text.trim(),
-      timestamp: new Date(),
-    };
-    setMessages(prev => [...prev, userMsg]);
-    setInput("");
-    setIsTyping(true);
-
-    setTimeout(() => {
-      const response = generateBotResponse(text);
-      const botMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "bot",
-        text: response.text,
-        orderCard: response.orderCard,
-        chips: response.chips,
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, botMsg]);
-      setIsTyping(false);
-      if (response.orderCard) setSelectedOrder(response.orderCard);
-    }, 1000 + Math.random() * 600);
-  };
-
-  const handleChipClick = (e: React.MouseEvent) => {
-    const chip = (e.target as HTMLElement).closest("[data-chip]")?.getAttribute("data-chip");
-    if (chip) sendMessage(chip);
+  const sendChip = (chip: string) => {
+    doSend(chip);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      sendMessage(input);
+      doSend(inputValue);
     }
   };
 
@@ -378,7 +240,7 @@ export default function Home() {
           </div>
           <div>
             <h1 className="font-display text-lg font-bold text-[#1B4332] leading-none">ShopAssist AI</h1>
-            <p className="text-[10px] text-gray-400 font-body">E-Commerce Support Bot</p>
+            <p className="text-[10px] text-gray-400 font-body">Powered by Groq · llama-3.3-70b</p>
           </div>
         </div>
         <div className="flex items-center gap-4">
@@ -406,7 +268,6 @@ export default function Home() {
             background: `url('https://d2xsxph8kpxj0f.cloudfront.net/116904845/ejTkHNWBAbKrRgMUkRFbyy/sidebar-pattern-Rkw96c4TLYDSLWCyMDvY56.webp') center/cover`,
           }}
         >
-          {/* Sidebar overlay for readability */}
           <div className="flex flex-col flex-1 overflow-hidden bg-white/80 backdrop-blur-sm">
             {/* User greeting */}
             <div className="px-4 pt-5 pb-4 border-b border-gray-100">
@@ -426,14 +287,14 @@ export default function Home() {
               <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Quick Actions</p>
               <div className="space-y-1">
                 {[
-                  { icon: <Package className="w-4 h-4" />, label: "Track an Order", prompt: "Track my order" },
+                  { icon: <Package className="w-4 h-4" />, label: "Track an Order", prompt: "Track my most recent order" },
                   { icon: <RotateCcw className="w-4 h-4" />, label: "Start a Return", prompt: "I want to start a return" },
                   { icon: <HelpCircle className="w-4 h-4" />, label: "Shipping FAQ", prompt: "What is your shipping policy?" },
                   { icon: <MessageSquare className="w-4 h-4" />, label: "Talk to an Agent", prompt: "I need to speak to a human agent" },
                 ].map(({ icon, label, prompt }) => (
                   <button
                     key={label}
-                    onClick={() => sendMessage(prompt)}
+                    onClick={() => sendChip(prompt)}
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-700 hover:bg-[#1B4332]/5 hover:text-[#1B4332] transition-colors group"
                   >
                     <span className="text-[#1B4332]/50 group-hover:text-[#1B4332] transition-colors">{icon}</span>
@@ -451,7 +312,7 @@ export default function Home() {
                 {MOCK_ORDERS.map(order => (
                   <button
                     key={order.id}
-                    onClick={() => sendMessage(`Track my order ${order.id}`)}
+                    onClick={() => sendChip(`What is the status of my order ${order.id}?`)}
                     className={`w-full text-left p-3 rounded-xl border transition-all ${
                       selectedOrder?.id === order.id
                         ? "border-[#1B4332]/30 bg-[#1B4332]/5"
@@ -474,7 +335,11 @@ export default function Home() {
               <p className="text-[10px] text-gray-500 mb-1.5">Rate your experience</p>
               <div className="flex gap-1">
                 {[1, 2, 3, 4, 5].map(star => (
-                  <button key={star} className="text-amber-300 hover:text-amber-500 transition-colors">
+                  <button
+                    key={star}
+                    onClick={() => setRating(star)}
+                    className={`transition-colors ${star <= rating ? "text-amber-500" : "text-amber-200 hover:text-amber-400"}`}
+                  >
                     <Star className="w-4 h-4 fill-current" />
                   </button>
                 ))}
@@ -486,41 +351,126 @@ export default function Home() {
         {/* Chat Area */}
         <main className="flex-1 flex flex-col overflow-hidden">
           {/* Messages */}
-          <div
-            className="flex-1 overflow-y-auto custom-scrollbar px-6 py-6 space-y-5"
-            onClick={handleChipClick}
-          >
-            {messages.map(msg =>
-              msg.role === "bot"
-                ? <BotMessage key={msg.id} message={msg} />
-                : <UserMessage key={msg.id} message={msg} />
-            )}
-            {isTyping && <TypingIndicator />}
+          <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-6 space-y-5">
+            {/* Static welcome message — always shown, never sent to API */}
+            <div className="flex gap-3 message-animate">
+              <div className="w-8 h-8 rounded-full bg-[#1B4332] flex items-center justify-center flex-shrink-0 mt-0.5">
+                <img
+                  src="https://d2xsxph8kpxj0f.cloudfront.net/116904845/ejTkHNWBAbKrRgMUkRFbyy/hero-bot-avatar-5Ecm4BhbQjjHou96DWQk9W.webp"
+                  alt="Bot"
+                  className="w-full h-full rounded-full object-cover"
+                />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm max-w-lg">
+                  <div className="text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
+                    <Streamdown>{"Hello! I'm **ShopAssist**, your AI-powered support agent. I'm here to help you with order tracking, returns, cancellations, and more.\n\nWhat can I help you with today?"}</Streamdown>
+                  </div>
+                </div>
+                {messages.length === 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {WELCOME_CHIPS.map((chip, i) => (
+                      <button
+                        key={chip}
+                        onClick={() => sendChip(chip)}
+                        className="chip-animate text-xs px-3 py-1.5 rounded-full border border-[#1B4332]/20 text-[#1B4332] bg-white hover:bg-[#1B4332] hover:text-white transition-all duration-150 font-medium shadow-sm"
+                        style={{ animationDelay: `${i * 60}ms` }}
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {messages.map((msg, idx) => {
+              const isBot = msg.role === "assistant";
+              const isLast = idx === messages.length - 1;
+              const msgText = msg.parts.filter(p => p.type === "text").map(p => (p as { type: "text"; text: string }).text).join("");
+              const orderCard = isBot ? detectOrderCard(msgText) : null;
+              const chips = isBot && isLast && !isLoading ? detectChips(msgText) : null;
+
+              if (!isBot) {
+                return (
+                  <div key={msg.id} className="flex gap-3 justify-end message-animate">
+                    <div className="flex-1 min-w-0 flex flex-col items-end">
+                      <div className="bg-[#1B4332] text-white rounded-2xl rounded-tr-sm px-4 py-3 shadow-sm max-w-sm">
+                        <p className="text-sm leading-relaxed">{msgText}</p>
+                      </div>
+                    </div>
+                    <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0 mt-0.5 text-amber-700 font-semibold text-sm">
+                      Y
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div key={msg.id} className="flex gap-3 message-animate">
+                  <div className="w-8 h-8 rounded-full bg-[#1B4332] flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <img
+                      src="https://d2xsxph8kpxj0f.cloudfront.net/116904845/ejTkHNWBAbKrRgMUkRFbyy/hero-bot-avatar-5Ecm4BhbQjjHou96DWQk9W.webp"
+                      alt="Bot"
+                      className="w-full h-full rounded-full object-cover"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm max-w-lg">
+                      <div className="text-sm text-gray-800 leading-relaxed prose prose-sm max-w-none">
+                        <Streamdown>{msgText}</Streamdown>
+                      </div>
+                      {orderCard && <OrderCard order={orderCard} />}
+                    </div>
+                    {chips && chips.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {chips.map((chip, i) => (
+                          <button
+                            key={chip}
+                            onClick={() => sendChip(chip)}
+                            className="chip-animate text-xs px-3 py-1.5 rounded-full border border-[#1B4332]/20 text-[#1B4332] bg-white hover:bg-[#1B4332] hover:text-white transition-all duration-150 font-medium shadow-sm"
+                            style={{ animationDelay: `${i * 60}ms` }}
+                          >
+                            {chip}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+
+
+            {isLoading && <TypingIndicator />}
             <div ref={messagesEndRef} />
           </div>
 
           {/* Input Bar */}
           <div className="border-t border-gray-100 bg-white px-6 py-4">
-            <div className="flex items-center gap-3 bg-[#FAFAF7] border border-gray-200 rounded-2xl px-4 py-2.5 focus-within:border-[#1B4332]/40 focus-within:ring-2 focus-within:ring-[#1B4332]/10 transition-all">
-              <input
-                ref={inputRef}
-                type="text"
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Ask about your order, returns, or anything else..."
-                className="flex-1 bg-transparent text-sm text-gray-800 placeholder-gray-400 outline-none font-body"
-              />
-              <button
-                onClick={() => sendMessage(input)}
-                disabled={!input.trim()}
-                className="w-8 h-8 rounded-xl bg-[#1B4332] text-white flex items-center justify-center disabled:opacity-30 hover:bg-[#1B4332]/90 transition-all active:scale-95"
-              >
-                <Send className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <form onSubmit={(e) => { e.preventDefault(); doSend(inputValue); }}>
+              <div className="flex items-center gap-3 bg-[#FAFAF7] border border-gray-200 rounded-2xl px-4 py-2.5 focus-within:border-[#1B4332]/40 focus-within:ring-2 focus-within:ring-[#1B4332]/10 transition-all">
+                <input
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Ask about your order, returns, or anything else..."
+                  className="flex-1 bg-transparent text-sm text-gray-800 placeholder-gray-400 outline-none font-body"
+                  disabled={isLoading}
+                />
+                <button
+                  type="submit"
+                  disabled={!inputValue.trim() || isLoading}
+                  className="w-8 h-8 rounded-xl bg-[#1B4332] text-white flex items-center justify-center disabled:opacity-30 hover:bg-[#1B4332]/90 transition-all active:scale-95"
+                >
+                  {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </form>
             <p className="text-[10px] text-gray-400 text-center mt-2">
-              ShopAssist AI · Powered by LLM · Responses may not always be accurate
+              ShopAssist AI · Powered by Groq (llama-3.3-70b) · Responses may not always be accurate
             </p>
           </div>
         </main>
