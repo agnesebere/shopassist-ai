@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, orders } from "../drizzle/schema";
+import { InsertUser, users, orders, InsertOrder, Order } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -102,4 +102,33 @@ export async function getOrderById(orderId: string) {
   if (!db) return undefined;
   const result = await db.select().from(orders).where(eq(orders.orderId, orderId)).limit(1);
   return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getAllOrders() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(orders).orderBy(desc(orders.createdAt));
+}
+
+export async function createOrder(order: InsertOrder): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(orders).values(order);
+}
+
+export async function updateOrderStatus(
+  orderId: string,
+  update: { status: Order["status"]; statusLabel: string; steps: string; notes: string | null }
+): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(orders)
+    .set({ status: update.status, statusLabel: update.statusLabel, steps: update.steps, notes: update.notes })
+    .where(eq(orders.orderId, orderId));
+}
+
+export async function deleteOrder(orderId: string): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(orders).where(eq(orders.orderId, orderId));
 }
