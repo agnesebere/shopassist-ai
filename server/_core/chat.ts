@@ -2,7 +2,7 @@
  * ShopAssist AI — Chat API Handler
  *
  * Streaming chat endpoint powered by Groq (llama-3.3-70b-versatile).
- * Includes order-lookup and return-initiation tools backed by mock data.
+ * Orders are loaded from the database; tools query DB in real-time.
  */
 
 import { streamText, stepCountIs, tool, convertToModelMessages } from "ai";
@@ -10,49 +10,14 @@ import { createGroq } from "@ai-sdk/groq";
 import type { Express } from "express";
 import { z } from "zod/v4";
 import { ENV } from "./env";
+import { getOrdersByCustomer, getOrderById } from "../db";
 
-// ── Mock Order Database ──────────────────────────────────────
-const ORDERS = [
-  {
-    id: "ORD-78234",
-    product: "Wireless Noise-Cancelling Headphones",
-    date: "Feb 28, 2026",
-    status: "in_transit",
-    statusLabel: "In Transit",
-    eta: "Mar 8, 2026",
-    carrier: "FedEx",
-    trackingCode: "FX9284710234",
-    price: "$149.99",
-    steps: ["ordered", "processed", "shipped", "in_transit"],
-  },
-  {
-    id: "ORD-77891",
-    product: "Ergonomic Office Chair",
-    date: "Feb 20, 2026",
-    status: "delivered",
-    statusLabel: "Delivered",
-    eta: "Feb 25, 2026",
-    carrier: "UPS",
-    trackingCode: "UP1928374650",
-    price: "$329.00",
-    steps: ["ordered", "processed", "shipped", "in_transit", "delivered"],
-  },
-  {
-    id: "ORD-76540",
-    product: "Stainless Steel Water Bottle (3-pack)",
-    date: "Mar 1, 2026",
-    status: "processing",
-    statusLabel: "Processing",
-    eta: "Mar 10, 2026",
-    carrier: "DHL",
-    trackingCode: "DH7364829103",
-    price: "$44.99",
-    steps: ["ordered", "processed"],
-  },
-];
+// Default customer ID for demo purposes
+const DEMO_CUSTOMER_ID = "C-10482";
 
-// ── System Prompt ────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are ShopAssist, a friendly and efficient AI-powered customer support agent for ShopMart, an e-commerce platform.
+// ── System Prompt Builder ────────────────────────────────────
+function buildSystemPrompt(orderSummary: string) {
+  return `You are ShopAssist, a friendly and efficient AI-powered customer support agent for ShopMart, an e-commerce platform.
 
 Your role is to help customers with:
 - Order tracking and delivery status updates
@@ -61,69 +26,110 @@ Your role is to help customers with:
 - Shipping policy questions
 - General FAQs
 
-The customer has the following recent orders:
-${ORDERS.map(o => `- ${o.id}: ${o.product} | Status: ${o.statusLabel} | Ordered: ${o.date} | Price: ${o.price} | Carrier: ${o.carrier} | ETA: ${o.eta} | Tracking: ${o.trackingCode}`).join("\n")}
+The customer (ID: ${DEMO_CUSTOMER_ID}) has the following recent orders:
+${orderSummary}
 
 Guidelines:
 - Be warm, concise, and helpful. Use the customer's order data when relevant.
-- Use the lookupOrder tool when a customer asks about a specific order.
+- Use the lookupOrder tool when a customer asks about a specific order by ID.
 - Use the initiateReturn tool when a customer wants to start a return.
-- For cancellations: only ORD-76540 is still in "processing" and can be cancelled. ORD-78234 is already shipped and cannot be cancelled.
+- For cancellations: only orders with status "processing" can be cancelled. Shipped/in-transit orders cannot be cancelled.
+- For delayed orders: acknowledge the delay, share the notes/reason if available, and offer to escalate.
+- For cancelled orders: confirm the cancellation and refund status.
+- For refunded orders: confirm the refund was processed.
 - For escalations, provide the contact: support@shopmart.com or 1-800-SHOP-123.
 - Shipping policy: free standard shipping on orders over $50; express 2-day for $9.99.
 - Refunds are processed within 5–7 business days.
 - Always be honest if you don't know something.`;
+}
 
 // ── Tools ────────────────────────────────────────────────────
-const shopTools = {
-  lookupOrder: tool({
-    description: "Look up the details and current status of a customer order by order ID",
-    inputSchema: z.object({
-      orderId: z.string().describe("The order ID to look up, e.g. ORD-78234"),
-    }),
-    execute: async ({ orderId }) => {
-      const order = ORDERS.find(o => o.id.toLowerCase() === orderId.toLowerCase());
-      if (!order) {
-        return { found: false, message: `No order found with ID ${orderId}` };
-      }
-      return { found: true, order };
-    },
-  }),
-
-  initiateReturn: tool({
-    description: "Initiate a return request for a delivered order",
-    inputSchema: z.object({
-      orderId: z.string().describe("The order ID to return"),
-      reason: z.string().describe("The reason for the return"),
-    }),
-    execute: async ({ orderId, reason }) => {
-      const order = ORDERS.find(o => o.id.toLowerCase() === orderId.toLowerCase());
-      if (!order) {
-        return { success: false, message: `Order ${orderId} not found.` };
-      }
-      if (order.status !== "delivered") {
+function buildShopTools() {
+  return {
+    lookupOrder: tool({
+      description: "Look up the details and current status of a customer order by order ID",
+      inputSchema: z.object({
+        orderId: z.string().describe("The order ID to look up, e.g. ORD-78234"),
+      }),
+      execute: async ({ orderId }) => {
+        const order = await getOrderById(orderId);
+        if (!order) {
+          return { found: false, message: `No order found with ID ${orderId}` };
+        }
         return {
-          success: false,
-          message: `Order ${orderId} cannot be returned yet — it has not been delivered. Current status: ${order.statusLabel}.`,
+          found: true,
+          order: {
+            ...order,
+            steps: JSON.parse(order.steps || "[]"),
+          },
         };
-      }
-      const returnId = `RET-${Math.floor(10000 + Math.random() * 90000)}`;
-      return {
-        success: true,
-        returnId,
-        message: `Return initiated successfully for ${order.product}. Return ID: ${returnId}. A prepaid shipping label will be emailed to you within 24 hours. Reason recorded: "${reason}".`,
-      };
-    },
-  }),
+      },
+    }),
 
-  listOrders: tool({
-    description: "List all recent orders for the customer",
-    inputSchema: z.object({}),
-    execute: async () => {
-      return { orders: ORDERS };
-    },
-  }),
-};
+    listOrders: tool({
+      description: "List all recent orders for the customer",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const dbOrders = await getOrdersByCustomer(DEMO_CUSTOMER_ID);
+        return {
+          orders: dbOrders.map(o => ({
+            ...o,
+            steps: JSON.parse(o.steps || "[]"),
+          })),
+        };
+      },
+    }),
+
+    initiateReturn: tool({
+      description: "Initiate a return request for a delivered order",
+      inputSchema: z.object({
+        orderId: z.string().describe("The order ID to return"),
+        reason: z.string().describe("The reason for the return"),
+      }),
+      execute: async ({ orderId, reason }) => {
+        const order = await getOrderById(orderId);
+        if (!order) {
+          return { success: false, message: `Order ${orderId} not found.` };
+        }
+        if (order.status !== "delivered") {
+          return {
+            success: false,
+            message: `Order ${orderId} cannot be returned yet — it has not been delivered. Current status: ${order.statusLabel}.`,
+          };
+        }
+        const returnId = `RET-${Math.floor(10000 + Math.random() * 90000)}`;
+        return {
+          success: true,
+          returnId,
+          message: `Return initiated successfully for ${order.product}. Return ID: ${returnId}. A prepaid shipping label will be emailed to you within 24 hours. Reason recorded: "${reason}".`,
+        };
+      },
+    }),
+
+    cancelOrder: tool({
+      description: "Cancel an order that is still in processing status",
+      inputSchema: z.object({
+        orderId: z.string().describe("The order ID to cancel"),
+      }),
+      execute: async ({ orderId }) => {
+        const order = await getOrderById(orderId);
+        if (!order) {
+          return { success: false, message: `Order ${orderId} not found.` };
+        }
+        if (order.status !== "processing") {
+          return {
+            success: false,
+            message: `Order ${orderId} cannot be cancelled — it is already ${order.statusLabel}. Only orders in "Processing" status can be cancelled.`,
+          };
+        }
+        return {
+          success: true,
+          message: `Order ${orderId} (${order.product}) has been successfully cancelled. A full refund of ${order.price} will be processed within 5–7 business days.`,
+        };
+      },
+    }),
+  };
+}
 
 // ── Route Registration ───────────────────────────────────────
 export function registerChatRoutes(app: Express) {
@@ -138,14 +144,22 @@ export function registerChatRoutes(app: Express) {
         return;
       }
 
+      // Load orders from DB to build system prompt
+      const dbOrders = await getOrdersByCustomer(DEMO_CUSTOMER_ID);
+      const orderSummary = dbOrders.length > 0
+        ? dbOrders.map(o =>
+            `- ${o.orderId}: ${o.product} | Status: ${o.statusLabel} | Ordered: ${o.orderedAt} | Price: ${o.price} | Carrier: ${o.carrier ?? "N/A"} | ETA: ${o.eta ?? "N/A"} | Tracking: ${o.trackingCode ?? "N/A"}${o.notes ? ` | Note: ${o.notes}` : ""}`
+          ).join("\n")
+        : "No recent orders found.";
+
       // Convert UIMessage[] (from @ai-sdk/react useChat) to ModelMessage[] (required by streamText)
       const modelMessages = await convertToModelMessages(messages);
 
       const result = streamText({
         model: groq("llama-3.3-70b-versatile"),
-        system: SYSTEM_PROMPT,
+        system: buildSystemPrompt(orderSummary),
         messages: modelMessages,
-        tools: shopTools,
+        tools: buildShopTools(),
         stopWhen: stepCountIs(5),
       });
 
@@ -158,5 +172,3 @@ export function registerChatRoutes(app: Express) {
     }
   });
 }
-
-export { shopTools as tools };

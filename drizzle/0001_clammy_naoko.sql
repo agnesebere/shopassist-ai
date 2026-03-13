@@ -1,0 +1,20 @@
+CREATE TABLE `orders` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`orderId` varchar(32) NOT NULL,
+	`customerId` varchar(64) NOT NULL,
+	`product` varchar(255) NOT NULL,
+	`category` varchar(64),
+	`price` varchar(32) NOT NULL,
+	`status` enum('ordered','processing','shipped','in_transit','delivered','cancelled','refunded','delayed') NOT NULL,
+	`statusLabel` varchar(64) NOT NULL,
+	`carrier` varchar(64),
+	`trackingCode` varchar(64),
+	`eta` varchar(64),
+	`orderedAt` varchar(64) NOT NULL,
+	`steps` text NOT NULL,
+	`notes` text,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `orders_id` PRIMARY KEY(`id`),
+	CONSTRAINT `orders_orderId_unique` UNIQUE(`orderId`)
+);

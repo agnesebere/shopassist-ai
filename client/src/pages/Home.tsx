@@ -10,49 +10,30 @@ import { useState, useRef, useEffect } from "react";
 import {
   Send, Package, RotateCcw, HelpCircle, ChevronRight,
   Truck, CheckCircle2, Clock, AlertCircle, MessageSquare,
-  Phone, Mail, Star, Loader2
+  Phone, Mail, Star, Loader2, XCircle, RefreshCw
 } from "lucide-react";
 import { Streamdown } from "streamdown";
+import { trpc } from "@/lib/trpc";
 
-// ── Mock Order Data (mirrors server) ────────────────────────
-const MOCK_ORDERS = [
-  {
-    id: "ORD-78234",
-    product: "Wireless Noise-Cancelling Headphones",
-    date: "Feb 28, 2026",
-    status: "in_transit",
-    statusLabel: "In Transit",
-    eta: "Mar 8, 2026",
-    carrier: "FedEx",
-    trackingCode: "FX9284710234",
-    price: "$149.99",
-    steps: ["ordered", "processed", "shipped", "in_transit"],
-  },
-  {
-    id: "ORD-77891",
-    product: "Ergonomic Office Chair",
-    date: "Feb 20, 2026",
-    status: "delivered",
-    statusLabel: "Delivered",
-    eta: "Feb 25, 2026",
-    carrier: "UPS",
-    trackingCode: "UP1928374650",
-    price: "$329.00",
-    steps: ["ordered", "processed", "shipped", "in_transit", "delivered"],
-  },
-  {
-    id: "ORD-76540",
-    product: "Stainless Steel Water Bottle (3-pack)",
-    date: "Mar 1, 2026",
-    status: "processing",
-    statusLabel: "Processing",
-    eta: "Mar 10, 2026",
-    carrier: "DHL",
-    trackingCode: "DH7364829103",
-    price: "$44.99",
-    steps: ["ordered", "processed"],
-  },
-];
+// Order type from DB (via tRPC)
+type DBOrder = {
+  id: number;
+  orderId: string;
+  customerId: string;
+  product: string;
+  category: string | null;
+  price: string;
+  status: string;
+  statusLabel: string;
+  carrier: string | null;
+  trackingCode: string | null;
+  eta: string | null;
+  orderedAt: string;
+  steps: string[];
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 const STATUS_STEPS = ["ordered", "processed", "shipped", "in_transit", "delivered"];
 const STATUS_LABELS: Record<string, string> = {
@@ -75,6 +56,9 @@ function StatusIcon({ status }: { status: string }) {
     case "delivered": return <CheckCircle2 className="w-4 h-4 text-emerald-600" />;
     case "in_transit": return <Truck className="w-4 h-4 text-amber-500" />;
     case "processing": return <Clock className="w-4 h-4 text-blue-500" />;
+    case "delayed": return <AlertCircle className="w-4 h-4 text-red-500" />;
+    case "cancelled": return <XCircle className="w-4 h-4 text-gray-400" />;
+    case "refunded": return <RefreshCw className="w-4 h-4 text-purple-500" />;
     default: return <AlertCircle className="w-4 h-4 text-gray-400" />;
   }
 }
@@ -85,6 +69,8 @@ function StatusBadge({ status, label }: { status: string; label: string }) {
     in_transit: "bg-amber-50 text-amber-700 border-amber-200",
     processing: "bg-blue-50 text-blue-700 border-blue-200",
     delayed: "bg-red-50 text-red-700 border-red-200",
+    cancelled: "bg-gray-50 text-gray-500 border-gray-200",
+    refunded: "bg-purple-50 text-purple-700 border-purple-200",
   };
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${colors[status] || "bg-gray-50 text-gray-600 border-gray-200"}`}>
@@ -122,29 +108,34 @@ function OrderProgressBar({ currentSteps }: { currentSteps: string[] }) {
   );
 }
 
-function OrderCard({ order }: { order: typeof MOCK_ORDERS[0] }) {
+function OrderCard({ order }: { order: DBOrder }) {
   return (
     <div className="mt-2 bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-mono text-gray-400">{order.id}</p>
+          <p className="text-xs font-mono text-gray-400">{order.orderId}</p>
           <p className="text-sm font-semibold text-gray-800 truncate mt-0.5">{order.product}</p>
-          <p className="text-xs text-gray-500 mt-0.5">Ordered {order.date} · {order.price}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Ordered {order.orderedAt} · {order.price}</p>
         </div>
         <StatusBadge status={order.status} label={order.statusLabel} />
       </div>
       <div className="mt-2 pt-2 border-t border-gray-50 grid grid-cols-2 gap-2 text-xs text-gray-600">
         <div>
           <span className="text-gray-400">Carrier</span>
-          <p className="font-medium">{order.carrier}</p>
+          <p className="font-medium">{order.carrier ?? "N/A"}</p>
         </div>
         <div>
           <span className="text-gray-400">Est. Delivery</span>
-          <p className="font-medium">{order.eta}</p>
+          <p className="font-medium">{order.eta ?? "N/A"}</p>
         </div>
       </div>
+      {order.notes && (
+        <div className="mt-2 pt-2 border-t border-gray-50">
+          <p className="text-[10px] text-amber-600 bg-amber-50 rounded px-2 py-1">{order.notes}</p>
+        </div>
+      )}
       <div className="mt-2 pt-2 border-t border-gray-50">
-        <p className="text-[10px] text-gray-400 mb-1">Tracking: <span className="font-mono text-gray-600">{order.trackingCode}</span></p>
+        <p className="text-[10px] text-gray-400 mb-1">Tracking: <span className="font-mono text-gray-600">{order.trackingCode ?? "N/A"}</span></p>
         <OrderProgressBar currentSteps={order.steps} />
       </div>
     </div>
@@ -172,12 +163,10 @@ function TypingIndicator() {
   );
 }
 
-// Detect if a bot message mentions an order and return the matching order card
-function detectOrderCard(text: string): typeof MOCK_ORDERS[0] | null {
-  for (const order of MOCK_ORDERS) {
-    if (text.includes(order.id)) return order;
-  }
-  return null;
+// Detect if a bot message mentions an order and return the matching order ID
+function detectOrderId(text: string): string | null {
+  const match = text.match(/ORD-\d+/);
+  return match ? match[0] : null;
 }
 
 // Detect which quick-reply chips to show based on message content
@@ -190,7 +179,8 @@ function detectChips(text: string): string[] {
 
 // ── Main Component ───────────────────────────────────────────
 export default function Home() {
-  const [selectedOrder, setSelectedOrder] = useState<typeof MOCK_ORDERS[0] | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const { data: dbOrders = [], isLoading: ordersLoading } = trpc.orders.list.useQuery();
   const [rating, setRating] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -200,8 +190,8 @@ export default function Home() {
     transport: new DefaultChatTransport({ api: "/api/chat" }),
     onFinish: ({ message }: { message: UIMessage }) => {
       const text = message.parts.filter(p => p.type === "text").map(p => (p as { type: "text"; text: string }).text).join("");
-      const order = detectOrderCard(text);
-      if (order) setSelectedOrder(order);
+      const orderId = detectOrderId(text);
+      if (orderId) setSelectedOrderId(orderId);
     },
   }));
 
@@ -309,22 +299,26 @@ export default function Home() {
             <div className="px-4 py-4 flex-1 overflow-y-auto custom-scrollbar">
               <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-3">Recent Orders</p>
               <div className="space-y-2">
-                {MOCK_ORDERS.map(order => (
+                {ordersLoading ? (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader2 className="w-5 h-5 animate-spin text-[#1B4332]/40" />
+                  </div>
+                ) : dbOrders.map(order => (
                   <button
-                    key={order.id}
-                    onClick={() => sendChip(`What is the status of my order ${order.id}?`)}
+                    key={order.orderId}
+                    onClick={() => sendChip(`What is the status of my order ${order.orderId}?`)}
                     className={`w-full text-left p-3 rounded-xl border transition-all ${
-                      selectedOrder?.id === order.id
+                      selectedOrderId === order.orderId
                         ? "border-[#1B4332]/30 bg-[#1B4332]/5"
                         : "border-gray-100 bg-white hover:border-[#1B4332]/20 hover:bg-[#1B4332]/3"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-1">
-                      <p className="text-xs font-mono text-gray-400">{order.id}</p>
+                      <p className="text-xs font-mono text-gray-400">{order.orderId}</p>
                       <StatusBadge status={order.status} label={order.statusLabel} />
                     </div>
                     <p className="text-xs font-medium text-gray-700 mt-1 line-clamp-1">{order.product}</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">{order.date}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">{order.orderedAt}</p>
                   </button>
                 ))}
               </div>
@@ -388,7 +382,8 @@ export default function Home() {
               const isBot = msg.role === "assistant";
               const isLast = idx === messages.length - 1;
               const msgText = msg.parts.filter(p => p.type === "text").map(p => (p as { type: "text"; text: string }).text).join("");
-              const orderCard = isBot ? detectOrderCard(msgText) : null;
+              const detectedOrderId = isBot ? detectOrderId(msgText) : null;
+              const orderCard = detectedOrderId ? dbOrders.find(o => o.orderId === detectedOrderId) ?? null : null;
               const chips = isBot && isLast && !isLoading ? detectChips(msgText) : null;
 
               if (!isBot) {

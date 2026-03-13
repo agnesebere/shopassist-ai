@@ -25,4 +25,25 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+// ── Orders Table ─────────────────────────────────────────────
+export const orders = mysqlTable("orders", {
+  id: int("id").autoincrement().primaryKey(),
+  orderId: varchar("orderId", { length: 32 }).notNull().unique(),
+  customerId: varchar("customerId", { length: 64 }).notNull(),
+  product: varchar("product", { length: 255 }).notNull(),
+  category: varchar("category", { length: 64 }),
+  price: varchar("price", { length: 32 }).notNull(),
+  status: mysqlEnum("status", ["ordered", "processing", "shipped", "in_transit", "delivered", "cancelled", "refunded", "delayed"]).notNull(),
+  statusLabel: varchar("statusLabel", { length: 64 }).notNull(),
+  carrier: varchar("carrier", { length: 64 }),
+  trackingCode: varchar("trackingCode", { length: 64 }),
+  eta: varchar("eta", { length: 64 }),
+  orderedAt: varchar("orderedAt", { length: 64 }).notNull(),
+  steps: text("steps").notNull(), // JSON array stored as string
+  notes: text("notes"), // optional internal notes (e.g. delay reason)
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Order = typeof orders.$inferSelect;
+export type InsertOrder = typeof orders.$inferInsert;
