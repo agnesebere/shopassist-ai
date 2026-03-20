@@ -77,3 +77,12 @@ The five guardrails implemented in `server/_core/chat.ts` serve a dual purpose â
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability in this project, please open a GitHub issue marked `[SECURITY]` or contact the project owner directly. Do not disclose vulnerabilities publicly before they have been addressed.
+
+---
+
+## Team
+
+| Name | Role |
+|---|---|
+| Obikaonu Agnes Chidiebere | Developer & Presenter |
+| Sargunam Gunasekaran | Developer & Presenter |

@@ -58,6 +58,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and 
 
 ---
 
+## Team
+
+| Name | Role |
+|---|---|
+| Obikaonu Agnes Chidiebere | Developer & Presenter |
+| Sargunam Gunasekaran | Developer & Presenter |
+
+---
+
 ## Roadmap
 
 ### [v1.1.0] — Planned (Month 1 Pilot)

@@ -121,3 +121,12 @@ ShopAssist AI follows a standard three-tier web architecture extended with an AI
 | ORM | Drizzle ORM | 0.44 |
 | Runtime | Node.js | 22 |
 | Package manager | pnpm | 10 |
+
+---
+
+## Team
+
+| Name | Role |
+|---|---|
+| Obikaonu Agnes Chidiebere | Developer & Presenter |
+| Sargunam Gunasekaran | Developer & Presenter |

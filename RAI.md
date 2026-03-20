@@ -94,3 +94,12 @@ ShopAssist AI is designed to **augment**, not replace, human support agents. The
 - **No GPU infrastructure:** All inference runs on Groq's shared infrastructure, which uses custom LPU (Language Processing Unit) hardware optimised for energy efficiency.
 - **Serverless-first:** No always-on servers. The backend only consumes compute when a request is made.
 - **Minimal data storage:** No chat history is persisted. Only order records are stored in the database.
+
+---
+
+## Team
+
+| Name | Role |
+|---|---|
+| Obikaonu Agnes Chidiebere | Developer & Presenter |
+| Sargunam Gunasekaran | Developer & Presenter |

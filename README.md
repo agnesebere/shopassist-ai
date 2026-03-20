@@ -131,7 +131,8 @@ See [RAI.md](RAI.md) for guardrail design, evaluation policy, model selection ra
 
 | Name | Role |
 |---|---|
-| Agnes Obikaonu | Developer & Presenter |
+| Obikaonu Agnes Chidiebere | Developer & Presenter |
+| Sargunam Gunasekaran | Developer & Presenter |
 
 ---
 
