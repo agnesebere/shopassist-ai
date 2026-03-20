@@ -84,6 +84,10 @@ The app will be available at `http://localhost:3000`.
 
 **Live demo:** [https://shopassist-ejtkhnwb.manus.space](https://shopassist-ejtkhnwb.manus.space)
 
+**Demo video:** [Watch the full demo (MP4)](https://private-us-east-1.manuscdn.com/user_upload_by_module/session_file/116904845/CxhBijcNYtWOzjoO.mp4?Expires=1805546010&Signature=EKjln3lNwGqZq3m~i7HMwNaGWN-Tku6MM79iiqDM9AKDu7hvWfkaF15Vs~c6vaC2Ksa-IY-1ID8NontPrByWVoPio1r7o0xDDADidmg5ztx7J2xyJoYnGCvdkqxcHFDM6iOMKcjLiBq5UXhq32qP2Uq3hjTXfJGkapRGo8qxwfXLYypS6U8y1spnxVdetCJHEucUIC5DN6zKZa8aR9p4l4uYQwMecPaMHL-daQHa1VKDT383PNvoNBSXgZI-7yJ~1WJhSWtwYa~dhVmbtxWl2Pr4JLB-YYt~RXyXCy~3uq5Hb46R4gk-qULOrCYbXB5oCQis-fxeBtgEk7kD2S5BBg__&Key-Pair-Id=K2HSFNDJXOU9YS)
+
+**Presentation:** [ShopAssist-AI-Presentation.pptx](./ShopAssist-AI-Presentation.pptx)
+
 **Test prompts to try:**
 - `"Track my order ORD-78234"`
 - `"I want to return my headphones"`
@@ -92,7 +96,6 @@ The app will be available at `http://localhost:3000`.
 - `"My card number is 4111 1111 1111 1111"` *(triggers PII redaction guardrail)*
 
 **Admin panel:** Navigate to `/admin` to add, edit, or update order statuses.
-
 ---
 
 ## AI Components Disclosure
